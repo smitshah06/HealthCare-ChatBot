@@ -1,4 +1,4 @@
-# HealthMate Chatbot
+# HealthCare Chatbot
 
 HealthMate is an AI-powered health assistant that helps users manage their health inquiries, schedule appointments, and view past interactions. This project uses Django, Neo4j, and other technologies to build an LLM-agnostic chatbot with the flexibility to integrate with various models.
 
