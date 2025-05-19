@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HealthMate - Chatbot</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static '/styles.css' %}">
+    <script src="https://cdn.jsdelivr.net/npm/showdown@1.9.1/dist/showdown.min.js"></script>
+</head>
+<body>
+    <div class="main-grid-container">
+        <!-- Sidebar Section -->
+        <div class="sidebar-container">
+            <div class="sidebar-header">
+                <h2>Conversation History</h2>
+            </div>
+            <div id="history-dates-sidebar" class="sidebar-content">
+                {% for date in history_dates %}
+                    <button class="history-date" onclick="loadConversation('{{ date }}')">{{ date }}</button>
+                {% endfor %}
+            </div>
+
+            <!-- Search Box for Conversation History -->
+            <div class="search-box">
+                <input type="text" id="search-keyword" class="search-input" placeholder="Search keyword..." onkeyup="handleSearchTyping()" />
+                <button class="search-btn" onclick="searchConversation()">🔍 Search</button>
+                <button class="clear-btn" onclick="clearSearch()">✖️ Clear</button>
+            </div>
+
+            <!-- Search Options -->
+            <div class="search-options">
+                <label><input type="checkbox" id="search-case-sensitive"> Case-Sensitive</label>
+                <label><input type="checkbox" id="search-filter-user"> User Only</label>
+                <label><input type="checkbox" id="search-filter-bot"> Bot Only</label>
+            </div>
+
+            <!-- Search Results Container -->
+            <div id="search-results" class="search-results">
+                <p id="no-results-message" class="no-results-message" style="display:none;">No results found.</p>
+            </div>
+        </div>
+
+        <!-- Chatbox Section -->
+        <div class="chat-container">
+            <div class="chat-header">
+                <h1>Welcome to HealthMate</h1>
+            </div>
+            <div id="chat-box" class="chat-box">
+                <!-- Loading Spinner -->
+                <div id="loading-spinner" class="spinner" style="display:none;"></div>
+            </div>
+            <form id="chat-form" class="chat-form">
+                <input type="text" id="user-message" placeholder="Ask something about your health..." required>
+                <button type="submit">Send</button>
+            </form>
+        </div>
+
+        <!-- Sidebar for Additional Information -->
+        <div id="additional-info-sidebar" class="additional-info-sidebar">
+            <div class="sidebar-header">
+                <h2>Additional Information</h2>
+            </div>
+            <div id="additional-info-content" class="sidebar-content"></div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('chat-form');
+        const chatBox = document.getElementById('chat-box');
+        const spinner = document.getElementById('loading-spinner');
+        const additionalInfoSidebar = document.getElementById('additional-info-sidebar');
+        const additionalInfoContent = document.getElementById('additional-info-content');
+        const noResultsMessage = document.getElementById('no-results-message');
+
+        function handleSearchTyping() {
+            noResultsMessage.style.display = 'none';
+        }
+
+        async function searchConversation() {
+            const searchKeyword = document.getElementById('search-keyword').value;
+            if (!searchKeyword) return;
+
+            // Capture filter options
+            const caseSensitive = document.getElementById('search-case-sensitive').checked;
+            const filterUser = document.getElementById('search-filter-user').checked;
+            const filterBot = document.getElementById('search-filter-bot').checked;
+
+            try {
+                const response = await fetch('/search_conversation_history/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: new URLSearchParams({
+                        search_keyword: searchKeyword,
+                        case_sensitive: caseSensitive,
+                        filter_user: filterUser,
+                        filter_bot: filterBot
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to search conversation history');
+                }
+
+                const data = await response.json();
+                const searchResults = data.matching_conversations;
+                displaySearchResults(searchResults);
+            } catch (error) {
+                console.error('Error during search operation:', error);
+            }
+        }
+
+        function displaySearchResults(results) {
+            const resultsContainer = document.getElementById('search-results');
+            resultsContainer.innerHTML = '';
+
+            if (results.length === 0) {
+                noResultsMessage.style.display = 'block';
+                return;
+            }
+
+            results.forEach(result => {
+                const resultItem = document.createElement('div');
+                resultItem.classList.add('result-item');
+                resultItem.innerHTML = `<p><strong>${result.date}</strong> - ${result.sender}: ${highlightText(result.message, result.keyword)}</p>`;
+                resultsContainer.appendChild(resultItem);
+            });
+        }
+
+        function highlightText(text, keyword) {
+            const regex = new RegExp(`(${keyword})`, 'gi'); // Global and case insensitive
+            return text.replace(regex, `<span class="highlight">$1</span>`);
+        }
+
+        function clearSearch() {
+            document.getElementById('search-keyword').value = '';
+            document.getElementById('search-results').innerHTML = '';
+            noResultsMessage.style.display = 'none';
+        }
+
+        async function loadConversation(selectedDate) {
+            chatBox.innerHTML = '';
+            spinner.style.display = 'block';
+
+            try {
+                const response = await fetch('/get_conversation_by_date/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: new URLSearchParams({ selected_date: selectedDate })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to load conversation history');
+                }
+
+                const data = await response.json();
+                const conversation = data.conversation;
+
+                conversation.forEach(message => {
+                    addMessageToChat(message.sender, message.message);
+                });
+            } catch (error) {
+                console.error('Error loading conversation:', error);
+                alert('Could not load conversation history. Please try again.');
+            } finally {
+                spinner.style.display = 'none';
+            }
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const message = document.getElementById('user-message').value;
+            addMessageToChat('user', message);
+            spinner.style.display = 'block';
+
+            try {
+                const response = await fetch('', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRFToken': '{{ csrf_token }}'
+                    },
+                    body: new URLSearchParams({ message, patient_email: 'john.doe@example.com' })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Server error or failed response');
+                }
+
+                const data = await response.json();
+                spinner.style.display = 'none';
+
+                if (data.response) {
+                    addMessageToChat('bot', data.response);
+                }
+                if (data.additional_info) {
+                    showAdditionalInfo(data.additional_info);
+                }
+            } catch (error) {
+                console.error('Error during fetch operation:', error);
+                spinner.style.display = 'none';
+                alert('There was an issue communicating with the server. Please try again later.');
+            }
+        });
+
+        function addMessageToChat(sender, message) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('chat-message');
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const converter = new showdown.Converter();
+            const htmlMessage = converter.makeHtml(message);
+            const content = `
+                <div>${htmlMessage}</div>
+                <span class="timestamp">${time}</span>
+            `;
+
+            messageElement.innerHTML = content;
+
+            if (sender === 'user') {
+                messageElement.classList.add('user-message');
+            } else {
+                messageElement.classList.add('bot-message');
+            }
+
+            chatBox.appendChild(messageElement);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            document.getElementById('user-message').value = '';
+        }
+
+        function showAdditionalInfo(info) {
+            additionalInfoContent.innerHTML = `<p>${info}</p>`;
+            additionalInfoSidebar.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
